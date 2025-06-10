@@ -1,23 +1,19 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from 'react';
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from 'recharts';
+import { useState, useMemo, lazy, Suspense } from 'react';
+import Filters from './components/Filters';
+import FileUploader from './components/FileUploader';
 
-const COLORS = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#3B82F6'];
+const PieChartSection = lazy(() => import('./components/PieChartSection'));
+const BarChartSection = lazy(() => import('./components/BarChartSection'));
+const DataTable = lazy(() => import('./components/DataTable'));
+
+const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#3B82F6'];
 
 export default function Analyzer() {
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState('All');
+  const [dateFilter, setDateFilter] = useState('All');
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -26,115 +22,73 @@ export default function Analyzer() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const result = JSON.parse(event.target?.result as string);
+        const text = event.target?.result as string;
+        const result = JSON.parse(text);
+
+        if (!Array.isArray(result)) throw new Error('JSON should be an array');
+        for (const txn of result) {
+          if (
+            typeof txn.date !== 'string' ||
+            typeof txn.category !== 'string' ||
+            typeof txn.amount !== 'number'
+          ) {
+            throw new Error('Invalid transaction object format');
+          }
+        }
+
         setTransactions(result);
       } catch (err) {
-        alert('Invalid file format. Please upload a valid JSON.');
+        alert('Invalid file format. Please upload a valid JSON array of transactions.');
+        setTransactions([]);
       }
     };
     reader.readAsText(file);
   };
 
-  // Group by category
-  const categoryData = transactions.reduce((acc: any, txn) => {
-    acc[txn.category] = (acc[txn.category] || 0) + txn.amount;
-    return acc;
-  }, {});
-  const pieData = Object.keys(categoryData).map((key) => ({
-    name: key,
-    value: categoryData[key],
-  }));
+  const uniqueCategories = useMemo(() => ['All', ...new Set(transactions.map(txn => txn.category))], [transactions]);
+  const uniqueDates = useMemo(() => ['All', ...new Set(transactions.map(txn => txn.date))], [transactions]);
 
-  // Group by date
-  const dateData = transactions.reduce((acc: any, txn) => {
-    acc[txn.date] = (acc[txn.date] || 0) + txn.amount;
-    return acc;
-  }, {});
-  const barData = Object.keys(dateData).map((date) => ({
-    date,
-    amount: dateData[date],
-  }));
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(txn =>
+      (categoryFilter === 'All' || txn.category === categoryFilter) &&
+      (dateFilter === 'All' || txn.date === dateFilter)
+    );
+  }, [transactions, categoryFilter, dateFilter]);
 
   return (
-    <main className="min-h-screen p-8 bg-gray-50">
-      <h1 className="text-4xl font-bold text-center text-blue-800 mb-6">💰 Spending Analyzer</h1>
+    <main className="min-h-screen bg-gradient-to-br from-white to-blue-50 p-8">
+      <h1 className="text-4xl font-serif font-bold text-center text-indigo-700 mb-10 drop-shadow-md">
+        💰 Spending Analyzer
+      </h1>
 
-      <div className="flex justify-center mb-8">
-        <input
-          type="file"
-          accept=".json,.pdf,.doc,.docx,.xls,.xlsx,.csv"
-          onChange={handleFileUpload}
-          className="border rounded px-4 py-2 cursor-pointer bg-white shadow"
-        />
-      </div>
+      <FileUploader handleFileUpload={handleFileUpload} />
 
       {transactions.length > 0 && (
-        <div className="grid md:grid-cols-2 gap-6 mb-10">
-          {/* Pie Chart */}
-          <div className="bg-white p-4 rounded shadow">
-            <h2 className="text-lg text-black font-semibold mb-2">Spending by Category</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  innerRadius={50}
-                  fill="#8884d8"
-                  label
-                >
-                  {pieData.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Bar Chart */}
-          <div className="bg-white p-4 rounded shadow">
-            <h2 className="text-lg text-black font-semibold mb-2">Spending by Date</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={barData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="amount" fill="#3B82F6" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <Filters
+          categories={uniqueCategories}
+          dates={uniqueDates}
+          categoryFilter={categoryFilter}
+          dateFilter={dateFilter}
+          setCategoryFilter={setCategoryFilter}
+          setDateFilter={setDateFilter}
+        />
       )}
 
-      <div className="overflow-x-auto">
-        {transactions.length > 0 ? (
-          <table className="w-full text-sm text-left border-collapse border border-gray-300 bg-white shadow-md rounded">
-            <thead>
-              <tr className="bg-blue-100 text-gray-800">
-                <th className="border p-2">📅 Date</th>
-                <th className="border p-2">🏷️ Category</th>
-                <th className="border p-2">💵 Amount (₹)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((txn, index) => (
-                <tr key={index} className="hover:bg-blue-50">
-                  <td className="text-black border p-2">{txn.date}</td>
-                  <td className="text-black border p-2">{txn.category}</td>
-                  <td className="text-black border p-2 font-medium">₹{txn.amount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <Suspense fallback={<p className="text-center">Loading visualizations...</p>}>
+        {filteredTransactions.length > 0 ? (
+          <>
+            <div className="grid md:grid-cols-2 gap-8 mb-14">
+              <PieChartSection transactions={filteredTransactions} colors={COLORS} />
+              <BarChartSection transactions={filteredTransactions} />
+            </div>
+            <DataTable transactions={filteredTransactions} />
+          </>
         ) : (
-          <p className="text-center text-gray-500 mt-8">Upload a valid JSON file to analyze spending.</p>
+          <p className="text-center text-gray-500 mt-12 italic">
+            Upload a valid JSON file to analyze your spending.
+          </p>
         )}
-      </div>
+      </Suspense>
     </main>
   );
 }
